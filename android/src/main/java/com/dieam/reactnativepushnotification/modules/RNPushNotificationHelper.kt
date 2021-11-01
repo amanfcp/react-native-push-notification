@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import androidx.core.text.HtmlCompat
@@ -32,6 +33,10 @@ import java.util.*
 
 class RNPushNotificationHelper(context: Application) {
     private val personsArray = ArrayList<InboxPerson>()
+    private val messagePersonsArray = ArrayList<MessagePerson>()
+    private val groups = ArrayList<Group>()
+
+
     private val context: Context
     private val config: RNPushNotificationConfig
     private val scheduledNotificationsPersistence: SharedPreferences
@@ -481,6 +486,16 @@ class RNPushNotificationHelper(context: Application) {
             // GROUPING OF NOTIFICATIONS WORK
 
             val notificationStyle = bundle.getString("style")
+            val isGroup = bundle.getBoolean("isGroup")
+            var groupId: Int = 0
+            var groupName: String = ""
+            var groupPersonKey: String = ""
+            if (isGroup) {
+                groupId = bundle.getString("groupId")!!.toInt()
+                groupName = bundle.getString("groupName", "")
+                groupPersonKey = bundle.getString("groupPersonKey", "")
+            }
+
             if (notificationStyle == "inbox") {
 
                 val newPerson = InboxPerson(
@@ -490,7 +505,67 @@ class RNPushNotificationHelper(context: Application) {
                 val updatedPerson = getPerson(newPerson)
                 notification.setStyle(updatedPerson.inboxStyle.addLine(message))
 
+            } else if (notificationStyle == "messaging") {
+                if (isGroup) {
+                    val newPerson = Person.Builder()
+                        .setName(title)
+                        .setKey(groupPersonKey)
+                        .build()
+
+                    val newMessagePerson = MessagePerson(notificationID, newPerson, null)
+
+                    val newMessagePersonList = ArrayList<MessagePerson>()
+                    newMessagePersonList.add(newMessagePerson)
+
+                    val newGroup = Group(
+                        groupId, groupName,
+                        NotificationCompat.MessagingStyle(newMessagePerson.person),
+                        newMessagePersonList
+                    )
+
+                    val updatedGroup = getGroup(newGroup)
+
+                    val currentIndex = updatedGroup.messagePersons.indexOfFirst { it.id == notificationID }
+
+                    notification.setStyle(
+                        updatedGroup.messageStyle
+                            .addMessage(
+                                message,
+                                System.currentTimeMillis(),
+                                updatedGroup.messagePersons[currentIndex].person
+                            )
+                            .setConversationTitle("${updatedGroup.name} (${updatedGroup.messageStyle.messages.size} message${if (updatedGroup.messageStyle.messages.size > 1) "s" else ""})")
+                    )
+
+                } else {
+
+                    val newPerson = Person.Builder()
+                        .setName(title)
+                        .setKey(title)
+                        .build()
+
+                    val newMessagePerson =
+                        MessagePerson(
+                            notificationID,
+                            newPerson,
+                            NotificationCompat.MessagingStyle(newPerson)
+                        )
+
+                    val updatedPerson = getMessagePerson(newMessagePerson)
+
+                    notification.setStyle(
+                        updatedPerson.messageStyle!!.addMessage(
+                            message,
+                            System.currentTimeMillis(),
+                            updatedPerson.person
+                        )
+                            .setConversationTitle("${updatedPerson.person.name} (${updatedPerson.messageStyle!!.messages.size} message${if (updatedPerson.messageStyle!!.messages.size > 1) "s" else ""})")
+                    )
+                }
+
             }
+
+            notification.setSubText("${getTotalMessages()} messages from ${getTotalChats()} chats")
 
             // Remove the notification from the shared preferences once it has been shown
             // to avoid showing the notification again when the phone is rebooted. If the
@@ -514,9 +589,16 @@ class RNPushNotificationHelper(context: Application) {
                 info.defaults = info.defaults or Notification.DEFAULT_LIGHTS
                 if (bundle.containsKey("tag")) {
                     val tag = bundle.getString("tag")
-                    notificationManager.notify(tag, notificationID, info)
+                    notificationManager.notify(
+                        tag,
+                        if (groupId > 0) groupId else notificationID,
+                        info
+                    )
                 } else {
-                    notificationManager.notify(notificationID, info)
+                    notificationManager.notify(
+                        if (groupId > 0) groupId else notificationID,
+                        info
+                    )
                 }
             }
 
@@ -528,6 +610,61 @@ class RNPushNotificationHelper(context: Application) {
         } catch (e: Exception) {
             Log.e(RNPushNotification.LOG_TAG, "failed to send push notification", e)
         }
+    }
+
+
+    private fun getGroup(group: Group): Group {
+        val index = groups.indexOfFirst { it.id == group.id }
+
+        val updatedGroup: Group
+
+        if (index != -1) {
+            updatedGroup = groups[index]
+
+            val alreadyExists =
+                groups[index].messagePersons.indexOfFirst { it.id == group.messagePersons[0].id }
+
+            if (alreadyExists == -1) {
+                groups[index].messagePersons.add(group.messagePersons[0])
+            }
+
+        } else {
+            updatedGroup = group
+            groups.add(updatedGroup)
+        }
+        return updatedGroup
+    }
+
+    private fun getMessagePerson(person: MessagePerson): MessagePerson {
+
+        val index = messagePersonsArray.indexOfFirst { it.id == person.id }
+
+        val updatedPerson: MessagePerson
+
+        if (index != -1) {
+            updatedPerson = messagePersonsArray[index]
+        } else {
+            updatedPerson = person
+            messagePersonsArray.add(updatedPerson)
+        }
+        return updatedPerson
+    }
+
+    private fun getTotalChats(): Int {
+        return groups.size + messagePersonsArray.size
+    }
+
+    private fun getTotalMessages(): Int {
+        var messagesCount = 0
+
+        for (item in messagePersonsArray) {
+            messagesCount += item.messageStyle!!.messages.size
+        }
+        for (group in groups) {
+            messagesCount += group.messageStyle.messages.size
+        }
+
+        return messagesCount
     }
 
     private fun getPerson(person: InboxPerson): InboxPerson {
