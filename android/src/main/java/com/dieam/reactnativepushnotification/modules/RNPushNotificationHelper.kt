@@ -525,7 +525,8 @@ class RNPushNotificationHelper(context: Application) {
 
                     val updatedGroup = getGroup(newGroup)
 
-                    val currentIndex = updatedGroup.messagePersons.indexOfFirst { it.id == notificationID }
+                    val currentIndex =
+                        updatedGroup.messagePersons.indexOfFirst { it.id == notificationID }
 
                     notification.setStyle(
                         updatedGroup.messageStyle
@@ -535,6 +536,7 @@ class RNPushNotificationHelper(context: Application) {
                                 updatedGroup.messagePersons[currentIndex].person
                             )
                             .setConversationTitle("${updatedGroup.name} (${updatedGroup.messageStyle.messages.size} message${if (updatedGroup.messageStyle.messages.size > 1) "s" else ""})")
+                            .setGroupConversation(true)
                     )
 
                 } else {
@@ -560,7 +562,9 @@ class RNPushNotificationHelper(context: Application) {
                             updatedPerson.person
                         )
                             .setConversationTitle("${updatedPerson.person.name} (${updatedPerson.messageStyle!!.messages.size} message${if (updatedPerson.messageStyle!!.messages.size > 1) "s" else ""})")
+                            .setGroupConversation(true)
                     )
+
                 }
 
             }
